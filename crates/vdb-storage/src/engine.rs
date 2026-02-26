@@ -236,15 +236,21 @@ impl StorageEngine {
 
         let mut all_hits = Vec::new();
 
-        // Search segments
+        // Search segments (HNSW index → selective Parquet read)
         for segment in &state.segments {
-            let results = segment.index.search(query, top_k, ef)?;
+            let mut results = segment.index.search(query, top_k, ef)?;
             if results.is_empty() {
                 continue;
             }
-            let row_ids: Vec<u64> = results.iter().map(|(id, _)| *id).collect();
-            let distances: Vec<f32> = results.iter().map(|(_, d)| *d).collect();
-            let batch = segment.read_by_row_ids(&row_ids)?;
+
+            // Sort by row_id so we can use Parquet RowSelection
+            results.sort_unstable_by_key(|(id, _)| *id);
+
+            let sorted_row_ids: Vec<u64> = results.iter().map(|(id, _)| *id).collect();
+            let sorted_distances: Vec<f32> = results.iter().map(|(_, d)| *d).collect();
+
+            // Read only the rows we need, excluding the vector column
+            let batch = segment.read_metadata_by_row_ids(&sorted_row_ids)?;
 
             let id_col = batch
                 .column_by_name(COL_ID)
@@ -253,7 +259,7 @@ impl StorageEngine {
                 .column_by_name(COL_DELETED)
                 .and_then(|c| c.as_any().downcast_ref::<BooleanArray>());
 
-            for (i, dist) in distances.iter().enumerate() {
+            for (i, dist) in sorted_distances.iter().enumerate() {
                 if i >= batch.num_rows() {
                     break;
                 }

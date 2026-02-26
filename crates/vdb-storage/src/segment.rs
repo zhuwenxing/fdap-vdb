@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use arrow::array::{as_string_array, AsArray, BooleanArray, Float32Array, RecordBatch};
 use arrow::compute::concat_batches;
-use arrow_schema::SchemaRef;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use parquet::arrow::ArrowWriter;
+use arrow_schema::{Schema, SchemaRef};
+use parquet::arrow::arrow_reader::{ParquetRecordBatchReaderBuilder, RowSelection, RowSelector};
+use parquet::arrow::{ArrowWriter, ProjectionMask};
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use vdb_common::config::CollectionConfig;
@@ -167,6 +167,88 @@ impl Segment {
 
         RecordBatch::try_new(all.schema(), columns).map_err(Into::into)
     }
+
+    /// Efficiently read only non-vector columns for specific rows.
+    ///
+    /// Uses Parquet RowSelection to skip unneeded rows and column projection
+    /// to skip the vector column (the largest column). `sorted_row_ids` must
+    /// be sorted in ascending order.
+    pub fn read_metadata_by_row_ids(&self, sorted_row_ids: &[u64]) -> Result<RecordBatch> {
+        if sorted_row_ids.is_empty() {
+            let projected = Arc::new(Schema::new(
+                self.schema
+                    .fields()
+                    .iter()
+                    .filter(|f| f.name() != COL_VECTOR)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            ));
+            return Ok(RecordBatch::new_empty(projected));
+        }
+
+        let path = self.path.join("data.parquet");
+        let file = fs::File::open(path)?;
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+
+        let total_rows = builder.metadata().file_metadata().num_rows() as usize;
+
+        // Column projection: exclude the vector column (largest by far)
+        let arrow_schema = builder.schema();
+        let proj_indices: Vec<usize> = arrow_schema
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.name() != COL_VECTOR)
+            .map(|(i, _)| i)
+            .collect();
+        let mask = ProjectionMask::roots(builder.parquet_schema(), proj_indices);
+
+        // Row selection: only read rows returned by HNSW
+        let selection = build_row_selection(sorted_row_ids, total_rows);
+
+        let reader = builder
+            .with_projection(mask)
+            .with_row_selection(selection)
+            .build()
+            .map_err(|e| VdbError::Storage(e.to_string()))?;
+
+        let batches: std::result::Result<Vec<_>, _> = reader.collect();
+        let batches = batches.map_err(|e| VdbError::Storage(e.to_string()))?;
+
+        if batches.is_empty() {
+            let projected = Arc::new(Schema::new(
+                self.schema
+                    .fields()
+                    .iter()
+                    .filter(|f| f.name() != COL_VECTOR)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            ));
+            return Ok(RecordBatch::new_empty(projected));
+        }
+
+        concat_batches(&batches[0].schema(), &batches).map_err(Into::into)
+    }
+}
+
+/// Build a RowSelection that picks only the given (sorted, ascending) row offsets.
+fn build_row_selection(sorted_ids: &[u64], total_rows: usize) -> RowSelection {
+    let mut selectors = Vec::with_capacity(sorted_ids.len() * 2);
+    let mut cursor = 0usize;
+
+    for &id in sorted_ids {
+        let id = id as usize;
+        if id >= total_rows {
+            break;
+        }
+        if id > cursor {
+            selectors.push(RowSelector::skip(id - cursor));
+        }
+        selectors.push(RowSelector::select(1));
+        cursor = id + 1;
+    }
+
+    RowSelection::from(selectors)
 }
 
 /// Build HNSW index from a merged RecordBatch.
