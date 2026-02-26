@@ -1,0 +1,24 @@
+[package]
+name = "vdb-query"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vdb-common = { workspace = true }
+vdb-index = { workspace = true }
+vdb-storage = { workspace = true }
+arrow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-cast = { workspace = true }
+datafusion = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rand = { workspace = true }

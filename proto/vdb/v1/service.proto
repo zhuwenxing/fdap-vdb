@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package vdb.v1;
+
+service VdbService {
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse);
+  rpc DropCollection(DropCollectionRequest) returns (DropCollectionResponse);
+  rpc Insert(InsertRequest) returns (InsertResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+message CreateCollectionRequest {
+  string name = 1;
+  uint32 dimension = 2;
+  string distance_metric = 3;
+  repeated FieldSchema metadata_fields = 4;
+}
+
+message FieldSchema {
+  string name = 1;
+  string field_type = 2; // "string", "int64", "float64", "bool"
+}
+
+message CreateCollectionResponse {}
+
+message ListCollectionsRequest {}
+
+message ListCollectionsResponse {
+  repeated CollectionInfo collections = 1;
+}
+
+message CollectionInfo {
+  string name = 1;
+  uint32 dimension = 2;
+  string distance_metric = 3;
+}
+
+message DropCollectionRequest {
+  string name = 1;
+}
+
+message DropCollectionResponse {}
+
+message InsertRequest {
+  string collection = 1;
+  repeated string ids = 2;
+  repeated Vector vectors = 3;
+  map<string, MetadataValues> metadata = 4;
+}
+
+message Vector {
+  repeated float values = 1;
+}
+
+message MetadataValues {
+  repeated MetadataValue values = 1;
+}
+
+message MetadataValue {
+  oneof value {
+    string string_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    bool bool_value = 4;
+  }
+}
+
+message InsertResponse {
+  uint64 count = 1;
+}
+
+message SearchRequest {
+  string collection = 1;
+  Vector query_vector = 2;
+  uint32 top_k = 3;
+  string distance_metric = 4;
+  string filter = 5;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+}
+
+message SearchResult {
+  string id = 1;
+  float distance = 2;
+  map<string, string> metadata = 3;
+}
+
+message DeleteRequest {
+  string collection = 1;
+  repeated string ids = 2;
+}
+
+message DeleteResponse {
+  uint64 count = 1;
+}

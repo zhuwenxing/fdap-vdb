@@ -1,0 +1,20 @@
+[package]
+name = "vdb-index"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vdb-common = { workspace = true }
+arrow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+hnsw_rs = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+tempfile = { workspace = true }
