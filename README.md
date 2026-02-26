@@ -10,6 +10,7 @@
 - **WAL 保障** — Arrow IPC 格式预写日志，crash recovery
 - **DataFusion SQL** — 每个集合注册为 DataFusion 表，支持向量距离 UDF + SQL 查询
 - **双协议服务** — gRPC 自定义接口 + FlightSQL 标准协议，同一端口
+- **软删除 + 自动 Compact** — 按 ID 软删除，后台自动合并 Segment 并物理清理
 - **Rust 客户端 SDK** — 类型安全的 gRPC 客户端
 
 ## 架构
@@ -32,6 +33,10 @@ Client (gRPC / FlightSQL)
 
 **搜索流程**: Query → 各 Segment HNSW Top-K → MemTable 暴力扫描 → 合并排序 → 返回 Top-K
 
+**删除流程**: Delete(IDs) → 记录到 deleted_ids 集合 → 持久化到 JSON → 搜索时自动过滤
+
+**Compact 流程**: Flush MemTable → 读取所有 Segment → 过滤已删除行 → 写入单个新 Segment → 清理旧文件
+
 ## 快速开始
 
 ### 启动服务器
@@ -46,7 +51,7 @@ cargo run -- serve --data-dir ./data --port 50051
 cargo run --example demo
 ```
 
-示例覆盖全流程：创建集合 → 插入向量 → 相似度搜索 → Flush 持久化 → 跨 Segment 搜索 → FlightSQL SQL 查询 → 集合管理。
+示例覆盖全流程：创建集合 → 插入向量 → 相似度搜索 → Flush 持久化 → 跨 Segment 搜索 → FlightSQL SQL 查询 → 软删除 → Compact → 集合管理。
 
 ### Rust 客户端
 
@@ -133,6 +138,22 @@ grpcurl -plaintext -d '{
   "query_vector": {"values": [1,0,0,0]},
   "top_k": 5
 }' localhost:50051 vdb.v1.VdbService/Search
+
+# 删除
+grpcurl -plaintext -d '{
+  "collection": "test",
+  "ids": ["a"]
+}' localhost:50051 vdb.v1.VdbService/Delete
+
+# 手动 Flush
+grpcurl -plaintext -d '{
+  "collection": "test"
+}' localhost:50051 vdb.v1.VdbService/Flush
+
+# 手动 Compact
+grpcurl -plaintext -d '{
+  "collection": "test"
+}' localhost:50051 vdb.v1.VdbService/Compact
 ```
 
 ## gRPC API
@@ -188,9 +209,11 @@ Crate 依赖链：`common` ← `index` ← `storage` ← `query` ← `server`；
 data/
 ├── catalog.json                                  # 集合元数据
 ├── wal/{collection}/{collection}.wal             # 预写日志 (Arrow IPC)
-└── collections/{collection}/segments/{seg_id}/
-    ├── data.parquet                              # 向量 + 元数据 (ZSTD)
-    └── hnsw_index/                               # HNSW 索引文件
+└── collections/{collection}/
+    ├── deleted_ids.json                          # 软删除 ID 列表
+    └── segments/{seg_id}/
+        ├── data.parquet                          # 向量 + 元数据 (ZSTD)
+        └── hnsw_index/                           # HNSW 索引文件
 ```
 
 ## 性能
@@ -236,6 +259,20 @@ cargo bench
 | `max_elements` | 1,000,000 | 最大向量数 |
 | `ef_construction` | 200 | 构建时搜索范围 |
 | `ef_search` | 50 | 查询时搜索范围 (越大越准但越慢) |
+
+### 自动 Compact
+
+服务器启动后会运行后台任务，定期检查每个集合并在满足条件时自动触发 Compact。
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `check_interval_secs` | 60 | 检查间隔（秒）|
+| `max_segments` | 4 | Segment 数量 ≥ 此值时触发 |
+| `delete_ratio_threshold` | 0.2 | 已删除比例 > 此值时触发 |
+
+触发条件（满足任一）：
+- Segment 数量 ≥ `max_segments`
+- 已删除行数 / 总行数 > `delete_ratio_threshold`
 
 ### Metadata 支持的字段类型
 
