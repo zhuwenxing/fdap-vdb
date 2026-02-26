@@ -35,6 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_config = vdb_server::ServerConfig {
         data_dir: data_dir.path().to_string_lossy().to_string(),
         port,
+        compaction: vdb_common::config::CompactionConfig {
+            check_interval_secs: 5, // shorter interval for demo
+            ..Default::default()
+        },
     };
 
     tokio::spawn(async move {

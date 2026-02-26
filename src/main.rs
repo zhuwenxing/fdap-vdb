@@ -32,7 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Serve { data_dir, port } => {
-            let config = vdb_server::ServerConfig { data_dir, port };
+            let config = vdb_server::ServerConfig {
+                data_dir,
+                port,
+                compaction: Default::default(),
+            };
             vdb_server::run_server(config).await?;
         }
     }

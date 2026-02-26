@@ -410,6 +410,18 @@ impl StorageEngine {
         }
     }
 
+    /// Get compaction statistics for a collection.
+    ///
+    /// Returns `(segment_count, total_rows_in_segments, deleted_ids_count)`.
+    pub fn compaction_stats(&self, collection: &str) -> Result<(usize, usize, usize)> {
+        let state_arc = self.get_state(collection)?;
+        let state = state_arc.read();
+        let seg_count = state.segments.len();
+        let total_rows: usize = state.segments.iter().map(|s| s.num_rows).sum();
+        let deleted_count = state.deleted_ids.len();
+        Ok((seg_count, total_rows, deleted_count))
+    }
+
     /// Soft-delete vectors by their IDs.
     ///
     /// Returns the number of IDs that were newly marked as deleted.

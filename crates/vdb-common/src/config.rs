@@ -78,3 +78,23 @@ impl Default for MemtableConfig {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    /// Check interval in seconds.
+    pub check_interval_secs: u64,
+    /// Trigger compact when segment count >= this threshold.
+    pub max_segments: usize,
+    /// Trigger compact when deleted ratio > this threshold (0.0 ~ 1.0).
+    pub delete_ratio_threshold: f64,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_secs: 60,
+            max_segments: 4,
+            delete_ratio_threshold: 0.2,
+        }
+    }
+}
