@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::flight_service_server::{FlightService, FlightServiceServer};
 use arrow_flight::sql::server::FlightSqlService;
-use arrow_flight::sql::{CommandStatementQuery, TicketStatementQuery};
+use arrow_flight::sql::{CommandStatementQuery, ProstMessageExt, TicketStatementQuery};
 use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
@@ -66,7 +66,7 @@ impl FlightSqlService for VdbFlightSqlService {
         let ticket_query = TicketStatementQuery {
             statement_handle: query.query.clone().into(),
         };
-        let ticket = Ticket::new(ticket_query.encode_to_vec());
+        let ticket = Ticket::new(ticket_query.as_any().encode_to_vec());
 
         let info = FlightInfo::new()
             .try_with_schema(&schema)
