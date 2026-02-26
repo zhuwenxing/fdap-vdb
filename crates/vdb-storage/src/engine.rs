@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -7,6 +7,7 @@ use arrow::array::{
     Array, BooleanArray, FixedSizeListArray, Float32Array, Int64Array, StringArray,
     TimestampMicrosecondArray,
 };
+use arrow::compute::concat_batches;
 use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -27,6 +28,7 @@ struct CollectionState {
     memtable: MemTable,
     wal: Wal,
     segments: Vec<Segment>,
+    deleted_ids: HashSet<String>,
 }
 
 pub struct StorageEngine {
@@ -36,6 +38,39 @@ pub struct StorageEngine {
 }
 
 impl StorageEngine {
+    /// Path to the deleted IDs file for a collection.
+    fn deleted_ids_path(data_dir: &Path, collection: &str) -> PathBuf {
+        data_dir
+            .join("collections")
+            .join(collection)
+            .join("deleted_ids.json")
+    }
+
+    /// Load deleted IDs from disk.
+    fn load_deleted_ids(data_dir: &Path, collection: &str) -> HashSet<String> {
+        let path = Self::deleted_ids_path(data_dir, collection);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(ids) = serde_json::from_str::<Vec<String>>(&content) {
+                    return ids.into_iter().collect();
+                }
+            }
+        }
+        HashSet::new()
+    }
+
+    /// Persist deleted IDs to disk.
+    fn save_deleted_ids(data_dir: &Path, collection: &str, ids: &HashSet<String>) -> Result<()> {
+        let path = Self::deleted_ids_path(data_dir, collection);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let vec: Vec<&String> = ids.iter().collect();
+        let content = serde_json::to_string(&vec)?;
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self> {
         let catalog = Catalog::open(data_dir)?;
         let mut collections = HashMap::new();
@@ -65,12 +100,21 @@ impl StorageEngine {
                 );
             }
 
+            let deleted_ids = Self::load_deleted_ids(data_dir, name);
+            if !deleted_ids.is_empty() {
+                tracing::info!(
+                    "loaded {} deleted IDs for collection {name}",
+                    deleted_ids.len()
+                );
+            }
+
             let state = CollectionState {
                 config: meta.config.clone(),
                 schema,
                 memtable,
                 wal,
                 segments,
+                deleted_ids,
             };
             collections.insert(name.clone(), Arc::new(RwLock::new(state)));
         }
@@ -95,6 +139,7 @@ impl StorageEngine {
             memtable,
             wal,
             segments: Vec::new(),
+            deleted_ids: HashSet::new(),
         };
         let name = state.config.name.clone();
         self.collections
@@ -268,6 +313,9 @@ impl StorageEngine {
                     continue;
                 }
                 let id = id_col.map_or_else(String::new, |c| c.value(i).to_string());
+                if state.deleted_ids.contains(&id) {
+                    continue;
+                }
 
                 let meta = extract_metadata(&batch, i);
                 all_hits.push(SearchHit {
@@ -304,6 +352,10 @@ impl StorageEngine {
                         if is_deleted {
                             continue;
                         }
+                        let row_id = ic.value(i).to_string();
+                        if state.deleted_ids.contains(&row_id) {
+                            continue;
+                        }
                         let start = i * dim;
                         let end = start + dim;
                         let vec = &raw[start..end];
@@ -311,7 +363,7 @@ impl StorageEngine {
 
                         let meta = extract_metadata(batch, i);
                         all_hits.push(SearchHit {
-                            id: ic.value(i).to_string(),
+                            id: row_id,
                             distance: dist,
                             metadata: meta,
                         });
@@ -356,6 +408,173 @@ impl StorageEngine {
         } else {
             Ok(false)
         }
+    }
+
+    /// Soft-delete vectors by their IDs.
+    ///
+    /// Returns the number of IDs that were newly marked as deleted.
+    pub fn delete(&self, collection: &str, ids: &[String]) -> Result<u64> {
+        let state_arc = self.get_state(collection)?;
+        let mut state = state_arc.write();
+
+        let mut count = 0u64;
+        for id in ids {
+            if state.deleted_ids.insert(id.clone()) {
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            Self::save_deleted_ids(&self.data_dir, collection, &state.deleted_ids)?;
+            tracing::info!("soft-deleted {count} IDs from collection {collection}");
+        }
+
+        Ok(count)
+    }
+
+    /// Compact a collection: merge all segments, remove deleted rows, produce a single new segment.
+    ///
+    /// Returns `(segments_before, segments_after, rows_removed)`.
+    pub fn compact(&self, collection: &str) -> Result<(usize, usize, usize)> {
+        let state_arc = self.get_state(collection)?;
+        let mut state = state_arc.write();
+
+        // First flush memtable so all data is in segments
+        let mem_batches = state.memtable.freeze();
+        if !mem_batches.is_empty() {
+            let seg_id = uuid::Uuid::new_v4().to_string();
+            let seg_base = self
+                .data_dir
+                .join("collections")
+                .join(collection)
+                .join("segments");
+            let num_rows: usize = mem_batches.iter().map(|b| b.num_rows()).sum();
+            let segment = Segment::write(
+                &seg_base,
+                &seg_id,
+                state.schema.clone(),
+                &mem_batches,
+                &state.config,
+            )?;
+            state.segments.push(segment);
+            self.catalog.write().register_segment(
+                collection,
+                SegmentMeta {
+                    id: seg_id,
+                    num_rows,
+                    has_index: true,
+                },
+            )?;
+            state.wal.clear()?;
+        }
+
+        let segments_before = state.segments.len();
+        if segments_before == 0 {
+            return Ok((0, 0, 0));
+        }
+
+        // Read all segment data
+        let mut all_batches = Vec::new();
+        for segment in &state.segments {
+            if let Ok(batch) = segment.read_all() {
+                all_batches.push(batch);
+            }
+        }
+
+        if all_batches.is_empty() {
+            return Ok((segments_before, 0, 0));
+        }
+
+        let merged = concat_batches(&state.schema, &all_batches)?;
+        let total_rows = merged.num_rows();
+
+        // Filter out deleted rows
+        let id_col = merged
+            .column_by_name(COL_ID)
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+        let deleted_col = merged
+            .column_by_name(COL_DELETED)
+            .and_then(|c| c.as_any().downcast_ref::<BooleanArray>());
+
+        let mut keep_indices = Vec::new();
+        for i in 0..total_rows {
+            let is_soft_deleted = deleted_col.is_some_and(|d| d.value(i));
+            let is_id_deleted = id_col
+                .is_some_and(|c| state.deleted_ids.contains(c.value(i)));
+            if !is_soft_deleted && !is_id_deleted {
+                keep_indices.push(i as u64);
+            }
+        }
+
+        let rows_removed = total_rows - keep_indices.len();
+
+        // Remove old segment directories
+        let seg_base = self
+            .data_dir
+            .join("collections")
+            .join(collection)
+            .join("segments");
+        let old_seg_ids: Vec<String> = state.segments.iter().map(|s| s.id.clone()).collect();
+        for seg_id in &old_seg_ids {
+            let seg_dir = seg_base.join(seg_id);
+            if seg_dir.exists() {
+                let _ = std::fs::remove_dir_all(&seg_dir);
+            }
+        }
+        state.segments.clear();
+
+        // Write new compacted segment if there are remaining rows
+        let segments_after;
+        if !keep_indices.is_empty() {
+            let indices_array = arrow::array::UInt64Array::from(keep_indices);
+            let columns: Vec<_> = merged
+                .columns()
+                .iter()
+                .map(|col| arrow::compute::take(col, &indices_array, None))
+                .collect::<std::result::Result<_, _>>()?;
+            let filtered = RecordBatch::try_new(state.schema.clone(), columns)?;
+
+            let seg_id = uuid::Uuid::new_v4().to_string();
+            let num_rows = filtered.num_rows();
+            let segment = Segment::write(
+                &seg_base,
+                &seg_id,
+                state.schema.clone(),
+                &[filtered],
+                &state.config,
+            )?;
+            state.segments.push(segment);
+
+            // Update catalog: replace all segments with one
+            {
+                let mut catalog = self.catalog.write();
+                let meta = catalog.get_collection_mut(collection)?;
+                meta.segments = vec![SegmentMeta {
+                    id: seg_id,
+                    num_rows,
+                    has_index: true,
+                }];
+                catalog.save()?;
+            }
+            segments_after = 1;
+        } else {
+            // All rows deleted, no segments remain
+            let mut catalog = self.catalog.write();
+            let meta = catalog.get_collection_mut(collection)?;
+            meta.segments.clear();
+            catalog.save()?;
+            segments_after = 0;
+        }
+
+        // Clear deleted IDs since they're now physically removed
+        state.deleted_ids.clear();
+        Self::save_deleted_ids(&self.data_dir, collection, &state.deleted_ids)?;
+
+        tracing::info!(
+            "compacted collection {collection}: {segments_before} → {segments_after} segments, {rows_removed} rows removed"
+        );
+
+        Ok((segments_before, segments_after, rows_removed))
     }
 }
 
@@ -582,5 +801,164 @@ mod tests {
         let hits = engine.search("test", &[1.0, 0.0, 0.0], 2, 50).unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, "id1");
+    }
+
+    #[test]
+    fn test_delete_from_memtable() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = StorageEngine::open(dir.path()).unwrap();
+        engine.create_collection(test_config()).unwrap();
+
+        engine
+            .insert(
+                "test",
+                vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+                vec![
+                    vec![1.0, 0.0, 0.0],
+                    vec![0.0, 1.0, 0.0],
+                    vec![0.0, 0.0, 1.0],
+                ],
+                HashMap::new(),
+            )
+            .unwrap();
+
+        // Delete id2
+        let count = engine.delete("test", &["id2".to_string()]).unwrap();
+        assert_eq!(count, 1);
+
+        // Search should not return id2
+        let hits = engine.search("test", &[0.0, 1.0, 0.0], 10, 50).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(!hits.iter().any(|h| h.id == "id2"));
+
+        // Deleting same ID again returns 0
+        let count = engine.delete("test", &["id2".to_string()]).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_delete_from_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = StorageEngine::open(dir.path()).unwrap();
+        engine.create_collection(test_config()).unwrap();
+
+        engine
+            .insert(
+                "test",
+                vec!["id1".to_string(), "id2".to_string()],
+                vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]],
+                HashMap::new(),
+            )
+            .unwrap();
+
+        engine.flush("test").unwrap();
+
+        // Delete from segment
+        let count = engine.delete("test", &["id1".to_string()]).unwrap();
+        assert_eq!(count, 1);
+
+        let hits = engine.search("test", &[1.0, 0.0, 0.0], 10, 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "id2");
+    }
+
+    #[test]
+    fn test_delete_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let engine = StorageEngine::open(dir.path()).unwrap();
+            engine.create_collection(test_config()).unwrap();
+            engine
+                .insert(
+                    "test",
+                    vec!["id1".to_string(), "id2".to_string()],
+                    vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]],
+                    HashMap::new(),
+                )
+                .unwrap();
+            engine.flush("test").unwrap();
+            engine.delete("test", &["id1".to_string()]).unwrap();
+        }
+
+        // Reopen and verify deletion persisted
+        let engine = StorageEngine::open(dir.path()).unwrap();
+        let hits = engine.search("test", &[1.0, 0.0, 0.0], 10, 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "id2");
+    }
+
+    #[test]
+    fn test_compact_removes_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = StorageEngine::open(dir.path()).unwrap();
+        engine.create_collection(test_config()).unwrap();
+
+        // Insert in two batches to create multiple segments
+        engine
+            .insert(
+                "test",
+                vec!["id1".to_string(), "id2".to_string()],
+                vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]],
+                HashMap::new(),
+            )
+            .unwrap();
+        engine.flush("test").unwrap();
+
+        engine
+            .insert(
+                "test",
+                vec!["id3".to_string(), "id4".to_string()],
+                vec![vec![0.0, 0.0, 1.0], vec![1.0, 1.0, 0.0]],
+                HashMap::new(),
+            )
+            .unwrap();
+        engine.flush("test").unwrap();
+
+        // Delete two vectors
+        engine
+            .delete("test", &["id1".to_string(), "id3".to_string()])
+            .unwrap();
+
+        // Compact
+        let (before, after, removed) = engine.compact("test").unwrap();
+        assert_eq!(before, 2);
+        assert_eq!(after, 1);
+        assert_eq!(removed, 2);
+
+        // Search should only find id2 and id4
+        let hits = engine.search("test", &[1.0, 0.0, 0.0], 10, 50).unwrap();
+        assert_eq!(hits.len(), 2);
+        let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+        assert!(ids.contains(&"id2"));
+        assert!(ids.contains(&"id4"));
+    }
+
+    #[test]
+    fn test_compact_merges_segments() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = StorageEngine::open(dir.path()).unwrap();
+        engine.create_collection(test_config()).unwrap();
+
+        // Create 3 segments
+        for i in 0..3 {
+            engine
+                .insert(
+                    "test",
+                    vec![format!("id{i}")],
+                    vec![vec![i as f32, 0.0, 0.0]],
+                    HashMap::new(),
+                )
+                .unwrap();
+            engine.flush("test").unwrap();
+        }
+
+        let (before, after, removed) = engine.compact("test").unwrap();
+        assert_eq!(before, 3);
+        assert_eq!(after, 1);
+        assert_eq!(removed, 0);
+
+        // All vectors should still be searchable
+        let hits = engine.search("test", &[1.0, 0.0, 0.0], 10, 50).unwrap();
+        assert_eq!(hits.len(), 3);
     }
 }

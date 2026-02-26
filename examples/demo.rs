@@ -7,7 +7,9 @@
 ///   4. Flush 持久化到 Parquet + HNSW 索引
 ///   5. Flush 后再次搜索（跨 segment + memtable）
 ///   6. 通过 FlightSQL 执行 SQL 查询
-///   7. 列出 / 删除集合
+///   7. Delete 软删除 + 验证搜索结果
+///   8. Compact 合并 segment + 物理清理
+///   9. 列出 / 删除集合
 ///
 /// 运行: cargo run --example demo
 use std::collections::HashMap;
@@ -105,12 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── 4. Flush 持久化 ──────────────────────────────────────────
     println!("=== Step 4: Flush to Parquet + HNSW index ===");
-    // 直接用 storage engine 的嵌入式方式触发 flush
-    // （实际生产中可以通过 gRPC 接口或自动触发）
-    {
-        let engine = vdb_storage::engine::StorageEngine::open(data_dir.path())?;
-        engine.flush("articles")?;
-    }
+    client.flush("articles").await?;
     println!("  flushed to disk\n");
 
     // ── 5. 插入更多数据，搜索跨 segment + memtable ──────────────
@@ -173,8 +170,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    // ── 7. 列出 & 删除集合 ───────────────────────────────────────
-    println!("=== Step 7: List & drop collection ===");
+    // ── 7. Delete 软删除 ──────────────────────────────────────────
+    println!("=== Step 7: Delete vectors ===");
+    let del_count = client
+        .delete("articles", vec!["article_0".to_string(), "extra_near".to_string()])
+        .await?;
+    println!("  deleted {del_count} vectors (article_0, extra_near)");
+
+    let hits = client
+        .search("articles", vec![1.0, 0.0, 0.0, 0.0], 5, "cosine", "")
+        .await?;
+    println!("  search after delete (article_0 and extra_near should be gone):");
+    print_hits(&hits);
+
+    // ── 8. Compact 合并 + 物理清理 ──────────────────────────────
+    println!("=== Step 8: Compact segments ===");
+    // Flush extra data first to create a second segment
+    client.flush("articles").await?;
+    println!("  flushed extra data to create 2nd segment");
+
+    let (before, after, removed) = client.compact("articles").await?;
+    println!("  compact result: {before} segments → {after} segment, {removed} rows removed");
+
+    let hits = client
+        .search("articles", vec![1.0, 0.0, 0.0, 0.0], 5, "cosine", "")
+        .await?;
+    println!("  search after compact:");
+    print_hits(&hits);
+
+    // ── 9. 列出 & 删除集合 ───────────────────────────────────────
+    println!("=== Step 9: List & drop collection ===");
     let collections = client.list_collections().await?;
     for col in &collections {
         println!(
@@ -192,15 +217,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let collections = client.list_collections().await?;
     println!("  collections count: {}", collections.len());
 
-    // 通过 gRPC 删除（client 没有 drop 方法，这里直接用底层 proto）
-    // 为简单起见，用 storage engine 演示
-    {
-        let engine = vdb_storage::engine::StorageEngine::open(data_dir.path())?;
-        engine.drop_collection("temp_collection")?;
-        println!("  dropped 'temp_collection'");
-        let remaining = engine.list_collections();
-        println!("  remaining collections: {}", remaining.len());
-    }
+    client.drop_collection("temp_collection").await?;
+    println!("  dropped 'temp_collection'");
+    let collections = client.list_collections().await?;
+    println!("  remaining collections: {}", collections.len());
 
     println!("\n=== Demo complete! ===");
     println!("  data directory: {}", data_dir.path().display());

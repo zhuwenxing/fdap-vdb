@@ -169,9 +169,40 @@ impl proto::vdb_service_server::VdbService for VdbGrpcService {
 
     async fn delete(
         &self,
-        _request: Request<proto::DeleteRequest>,
+        request: Request<proto::DeleteRequest>,
     ) -> Result<Response<proto::DeleteResponse>, Status> {
-        // TODO: implement soft-delete
-        Ok(Response::new(proto::DeleteResponse { count: 0 }))
+        let req = request.into_inner();
+        let count = self
+            .engine
+            .delete(&req.collection, &req.ids)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(proto::DeleteResponse { count }))
+    }
+
+    async fn compact(
+        &self,
+        request: Request<proto::CompactRequest>,
+    ) -> Result<Response<proto::CompactResponse>, Status> {
+        let req = request.into_inner();
+        let (before, after, removed) = self
+            .engine
+            .compact(&req.collection)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(proto::CompactResponse {
+            segments_before: before as u64,
+            segments_after: after as u64,
+            rows_removed: removed as u64,
+        }))
+    }
+
+    async fn flush(
+        &self,
+        request: Request<proto::FlushRequest>,
+    ) -> Result<Response<proto::FlushResponse>, Status> {
+        let req = request.into_inner();
+        self.engine
+            .flush(&req.collection)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(proto::FlushResponse {}))
     }
 }

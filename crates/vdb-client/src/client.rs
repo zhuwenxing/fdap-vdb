@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use tonic::transport::Channel;
 
 use crate::proto::{
-    self, vdb_service_client::VdbServiceClient, CreateCollectionRequest, FieldSchema,
-    InsertRequest, ListCollectionsRequest, MetadataValue, MetadataValues, SearchRequest, Vector,
+    self, vdb_service_client::VdbServiceClient, CompactRequest, CreateCollectionRequest,
+    DeleteRequest, DropCollectionRequest, FieldSchema, FlushRequest, InsertRequest,
+    ListCollectionsRequest, MetadataValue, MetadataValues, SearchRequest, Vector,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -139,6 +140,49 @@ impl VdbClient {
             })
             .collect();
         Ok(hits)
+    }
+
+    pub async fn delete(&mut self, collection: &str, ids: Vec<String>) -> Result<u64> {
+        let resp = self
+            .inner
+            .delete(DeleteRequest {
+                collection: collection.to_string(),
+                ids,
+            })
+            .await?;
+        Ok(resp.into_inner().count)
+    }
+
+    pub async fn compact(
+        &mut self,
+        collection: &str,
+    ) -> Result<(u64, u64, u64)> {
+        let resp = self
+            .inner
+            .compact(CompactRequest {
+                collection: collection.to_string(),
+            })
+            .await?;
+        let r = resp.into_inner();
+        Ok((r.segments_before, r.segments_after, r.rows_removed))
+    }
+
+    pub async fn flush(&mut self, collection: &str) -> Result<()> {
+        self.inner
+            .flush(FlushRequest {
+                collection: collection.to_string(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn drop_collection(&mut self, name: &str) -> Result<()> {
+        self.inner
+            .drop_collection(DropCollectionRequest {
+                name: name.to_string(),
+            })
+            .await?;
+        Ok(())
     }
 }
 

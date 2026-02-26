@@ -144,7 +144,9 @@ grpcurl -plaintext -d '{
 | `DropCollection` | 删除集合及其数据 |
 | `Insert` | 批量插入向量 + 元数据 |
 | `Search` | 向量相似度搜索 (Top-K) |
-| `Delete` | 按 ID 删除向量 (planned) |
+| `Delete` | 按 ID 软删除向量 |
+| `Flush` | 手动触发 MemTable 刷盘 |
+| `Compact` | 合并 Segment + 物理清理已删除数据 |
 
 同时支持 **FlightSQL** 协议，可用标准 Arrow Flight 客户端执行 SQL：
 

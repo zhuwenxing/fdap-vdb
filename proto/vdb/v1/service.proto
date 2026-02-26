@@ -9,6 +9,8 @@ service VdbService {
   rpc Insert(InsertRequest) returns (InsertResponse);
   rpc Search(SearchRequest) returns (SearchResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Compact(CompactRequest) returns (CompactResponse);
+  rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
 message CreateCollectionRequest {
@@ -97,3 +99,19 @@ message DeleteRequest {
 message DeleteResponse {
   uint64 count = 1;
 }
+
+message CompactRequest {
+  string collection = 1;
+}
+
+message CompactResponse {
+  uint64 segments_before = 1;
+  uint64 segments_after = 2;
+  uint64 rows_removed = 3;
+}
+
+message FlushRequest {
+  string collection = 1;
+}
+
+message FlushResponse {}
