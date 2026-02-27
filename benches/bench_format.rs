@@ -201,9 +201,7 @@ fn make_metadata_batch(n: usize) -> (Arc<Schema>, RecordBatch) {
     let ids: Vec<String> = (0..n).map(|i| format!("id_{i}")).collect();
     let id_array = Arc::new(StringArray::from(ids)) as Arc<dyn arrow::array::Array>;
 
-    let categories: Vec<String> = (0..n)
-        .map(|i| format!("cat_{}", i % 100))
-        .collect();
+    let categories: Vec<String> = (0..n).map(|i| format!("cat_{}", i % 100)).collect();
     let cat_array = Arc::new(StringArray::from(categories)) as Arc<dyn arrow::array::Array>;
 
     let scores: Vec<i64> = (0..n).map(|_| rng.gen_range(0..10000)).collect();
@@ -260,14 +258,12 @@ fn bench_format_write_metadata_only(c: &mut Criterion) {
                         let path = dir.path().join(filename);
                         (dir, path)
                     },
-                    |(_dir, path)| {
-                        match fmt {
-                            Parquet => {
-                                format::parquet::write_data(&path, schema.clone(), &batch).unwrap();
-                            }
-                            Vortex => {
-                                format::vortex::write_data(&path, schema.clone(), &batch).unwrap();
-                            }
+                    |(_dir, path)| match fmt {
+                        Parquet => {
+                            format::parquet::write_data(&path, schema.clone(), &batch).unwrap();
+                        }
+                        Vortex => {
+                            format::vortex::write_data(&path, schema.clone(), &batch).unwrap();
                         }
                     },
                 );
