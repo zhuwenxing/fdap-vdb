@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-wheels:
@@ -53,22 +53,16 @@ jobs:
           name: wheels-sdist
           path: crates/vdb-python/dist
 
-  publish:
+  release:
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/fdap-vdb
-    permissions:
-      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
-      - name: Publish to PyPI
-        uses: PyO3/maturin-action@v1
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          command: upload
-          args: --non-interactive --skip-existing dist/*
+          files: dist/*
