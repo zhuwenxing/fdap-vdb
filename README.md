@@ -5,7 +5,10 @@
 ## 安装
 
 ```bash
-# 从 GitHub 安装（需要 Rust toolchain）
+# 从 GitHub Release 下载预编译 wheel（无需 Rust toolchain）
+uv pip install "https://github.com/zhuwenxing/fdap-vdb/releases/latest/download/fdap_vdb-0.1.0-cp312-cp312-macosx_11_0_arm64.whl"
+
+# 或从源码编译安装（需要 Rust toolchain）
 uv pip install "fdap-vdb @ git+https://github.com/zhuwenxing/fdap-vdb.git#subdirectory=crates/vdb-python"
 ```
 
