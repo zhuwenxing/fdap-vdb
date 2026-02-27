@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use arrow::array::{
-    BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
+    BooleanArray, FixedSizeListArray, Float32Array, Int64Array, RecordBatch, StringArray,
     TimestampMicrosecondArray,
 };
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
@@ -194,10 +194,113 @@ fn bench_format_read_metadata(c: &mut Criterion) {
     group.finish();
 }
 
+/// Generate a metadata-only RecordBatch (no vector column) to isolate format overhead.
+fn make_metadata_batch(n: usize) -> (Arc<Schema>, RecordBatch) {
+    let mut rng = rand::thread_rng();
+
+    let ids: Vec<String> = (0..n).map(|i| format!("id_{i}")).collect();
+    let id_array = Arc::new(StringArray::from(ids)) as Arc<dyn arrow::array::Array>;
+
+    let categories: Vec<String> = (0..n)
+        .map(|i| format!("cat_{}", i % 100))
+        .collect();
+    let cat_array = Arc::new(StringArray::from(categories)) as Arc<dyn arrow::array::Array>;
+
+    let scores: Vec<i64> = (0..n).map(|_| rng.gen_range(0..10000)).collect();
+    let score_array = Arc::new(Int64Array::from(scores)) as Arc<dyn arrow::array::Array>;
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64;
+    let ts_array =
+        Arc::new(TimestampMicrosecondArray::from(vec![now; n])) as Arc<dyn arrow::array::Array>;
+    let deleted_array =
+        Arc::new(BooleanArray::from(vec![false; n])) as Arc<dyn arrow::array::Array>;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("_id", DataType::Utf8, false),
+        Field::new("category", DataType::Utf8, false),
+        Field::new("score", DataType::Int64, false),
+        Field::new(
+            "_created_at",
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            false,
+        ),
+        Field::new("_deleted", DataType::Boolean, false),
+    ]));
+
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![id_array, cat_array, score_array, ts_array, deleted_array],
+    )
+    .unwrap();
+
+    (schema, batch)
+}
+
+/// Benchmark: write metadata-only (no vector) to isolate format overhead.
+fn bench_format_write_metadata_only(c: &mut Criterion) {
+    let mut group = c.benchmark_group("format_write_metadata_only");
+    group.sample_size(10);
+
+    for &n in &[10_000, 100_000, 1_000_000] {
+        let (schema, batch) = make_metadata_batch(n);
+
+        for &fmt in &[Parquet, Vortex] {
+            let label = format!("{fmt}/{n}rows");
+            group.bench_function(BenchmarkId::new(&label, n), |b| {
+                b.iter_with_setup(
+                    || {
+                        let dir = tempfile::tempdir().unwrap();
+                        let filename = match fmt {
+                            Parquet => "data.parquet",
+                            Vortex => "data.vortex",
+                        };
+                        let path = dir.path().join(filename);
+                        (dir, path)
+                    },
+                    |(_dir, path)| {
+                        match fmt {
+                            Parquet => {
+                                format::parquet::write_data(&path, schema.clone(), &batch).unwrap();
+                            }
+                            Vortex => {
+                                format::vortex::write_data(&path, schema.clone(), &batch).unwrap();
+                            }
+                        }
+                    },
+                );
+            });
+        }
+
+        // Print file sizes after warmup
+        for &fmt in &[Parquet, Vortex] {
+            let dir = tempfile::tempdir().unwrap();
+            let filename = match fmt {
+                Parquet => "data.parquet",
+                Vortex => "data.vortex",
+            };
+            let path = dir.path().join(filename);
+            match fmt {
+                Parquet => format::parquet::write_data(&path, schema.clone(), &batch).unwrap(),
+                Vortex => format::vortex::write_data(&path, schema.clone(), &batch).unwrap(),
+            }
+            let file_size = std::fs::metadata(&path).unwrap().len();
+            println!(
+                "[metadata-only] [{fmt}] {n} rows file size: {:.2} MB",
+                file_size as f64 / (1024.0 * 1024.0)
+            );
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_format_write,
     bench_format_read_all,
-    bench_format_read_metadata
+    bench_format_read_metadata,
+    bench_format_write_metadata_only,
 );
 criterion_main!(benches);

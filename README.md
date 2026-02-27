@@ -1,12 +1,12 @@
 # fdap-vdb
 
-基于 **FDAP**（Flight + DataFusion + Arrow + Parquet）技术栈构建的单机向量数据库，面向 RAG / 语义搜索场景。
+基于 **FDAP**（Flight + DataFusion + Arrow + Parquet/Vortex）技术栈构建的单机向量数据库，面向 RAG / 语义搜索场景。
 
 ## 特性
 
 - **HNSW 向量索引** — 基于 `hnsw_rs`，支持 Cosine / L2 / Inner Product 三种距离度量
 - **Arrow 原生存储** — 向量以 `FixedSizeList<Float32>` 存储，元数据以 Arrow 列式格式管理
-- **Parquet 持久化** — ZSTD 压缩、RowSelection 精准行读取、列投影跳过大列
+- **双存储格式** — 支持 Vortex (默认) 和 Parquet 两种列式格式，可按集合切换
 - **WAL 保障** — Arrow IPC 格式预写日志，crash recovery
 - **DataFusion SQL** — 每个集合注册为 DataFusion 表，支持向量距离 UDF + SQL 查询
 - **双协议服务** — gRPC 自定义接口 + FlightSQL 标准协议，同一端口
@@ -22,14 +22,14 @@ Client (gRPC / FlightSQL)
          |
     vdb-query           ← DataFusion TableProvider + 距离 UDF
          |
-    vdb-storage         ← WAL → MemTable → Parquet Segment + HNSW Index
+    vdb-storage         ← WAL → MemTable → Vortex/Parquet Segment + HNSW Index
          |
     vdb-index           ← hnsw_rs
          |
     vdb-common          ← 共享类型、配置、Schema
 ```
 
-**写入流程**: Client → WAL 追加 → MemTable 缓冲 → 触发阈值 → Flush → Parquet + HNSW 索引 → 清理 WAL
+**写入流程**: Client → WAL 追加 → MemTable 缓冲 → 触发阈值 → Flush → Vortex/Parquet + HNSW 索引 → 清理 WAL
 
 **搜索流程**: Query → 各 Segment HNSW Top-K → MemTable 暴力扫描 → 合并排序 → 返回 Top-K
 
@@ -109,6 +109,7 @@ engine.create_collection(CollectionConfig {
     distance_metric: DistanceMetric::Cosine,
     index_config: Default::default(),
     metadata_fields: vec![],
+    storage_format: Default::default(), // Vortex (default) or Parquet
 })?;
 
 engine.insert("my_col", ids, vectors, HashMap::new())?;
@@ -191,7 +192,7 @@ fdap-vdb/
 ├── crates/
 │   ├── vdb-common/               # 共享类型、配置、错误、Schema
 │   ├── vdb-index/                # 向量索引 (HNSW + brute-force)
-│   ├── vdb-storage/              # 存储引擎 (WAL, MemTable, Parquet Segment)
+│   ├── vdb-storage/              # 存储引擎 (WAL, MemTable, Vortex/Parquet Segment)
 │   ├── vdb-query/                # DataFusion 集成 (TableProvider + UDF)
 │   ├── vdb-server/               # gRPC + FlightSQL 服务
 │   └── vdb-client/               # Rust 客户端 SDK
@@ -212,7 +213,8 @@ data/
 └── collections/{collection}/
     ├── deleted_ids.json                          # 软删除 ID 列表
     └── segments/{seg_id}/
-        ├── data.parquet                          # 向量 + 元数据 (ZSTD)
+        ├── data.vortex                           # 向量 + 元数据 (Vortex, 默认)
+        ├── data.parquet                          # 向量 + 元数据 (Parquet ZSTD, 可选)
         └── hnsw_index/                           # HNSW 索引文件
 ```
 
@@ -305,7 +307,8 @@ cargo run --example demo
 | 组件 | 版本 | 角色 |
 |------|------|------|
 | Arrow | 57 | 内存列式格式，向量 `FixedSizeList<Float32>` |
-| Parquet | 57 | 持久化存储，ZSTD 压缩，RowSelection |
+| Vortex | 0.60 | 默认持久化格式，高性能列式存储 |
+| Parquet | 57 | 可选持久化格式，ZSTD 压缩，RowSelection |
 | DataFusion | 52 | SQL 查询引擎，TableProvider + UDF |
 | Arrow Flight | 57 | 网络传输，FlightSQL 协议 |
 | tonic | 0.14 | gRPC 框架 |
