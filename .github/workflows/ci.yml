@@ -11,6 +11,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: arduino/setup-protoc@v3
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace -- -D warnings
       - run: cargo test --workspace
@@ -27,11 +28,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: arduino/setup-protoc@v3
       - name: Install dependencies
-        run: pip install maturin numpy pyarrow pytest
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install maturin numpy pyarrow pytest
       - name: Build and install vdb-python
         working-directory: crates/vdb-python
-        run: maturin develop
+        run: |
+          source ../../.venv/bin/activate
+          maturin develop
       - name: Run tests
         working-directory: crates/vdb-python
-        run: pytest tests/ -v
+        run: |
+          source ../../.venv/bin/activate
+          pytest tests/ -v
