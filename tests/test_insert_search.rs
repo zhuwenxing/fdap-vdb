@@ -69,7 +69,7 @@ fn test_create_insert_search() {
 
     // Search: query vector pointing in direction of doc_0
     let query = vec![1.0, 0.0, 0.0, 0.0];
-    let hits = engine.search("docs", &query, 10, 0).unwrap();
+    let hits = engine.search("docs", &query, 10, 50).unwrap();
     assert_eq!(hits.len(), 10);
 
     // Results should be sorted by distance (ascending)
@@ -137,7 +137,7 @@ fn test_search_after_flush() {
 
     // Search should find both
     let hits = engine
-        .search("test_flush", &[1.0, 0.0, 0.0, 0.0], 10, 0)
+        .search("test_flush", &[1.0, 0.0, 0.0, 0.0], 10, 50)
         .unwrap();
     assert_eq!(hits.len(), 2);
     assert_eq!(hits[0].id, "v1");
@@ -172,7 +172,7 @@ fn test_persistence() {
         assert_eq!(collections[0].name, "persist");
 
         let hits = engine
-            .search("persist", &[1.0, 0.0, 0.0, 0.0], 2, 0)
+            .search("persist", &[1.0, 0.0, 0.0, 0.0], 2, 50)
             .unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, "a");
