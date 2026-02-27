@@ -35,6 +35,9 @@ pub enum VdbError {
     #[error("parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
 
+    #[error("vortex error: {0}")]
+    Vortex(String),
+
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
 

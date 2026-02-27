@@ -11,6 +11,7 @@ arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-ipc = { workspace = true }
 parquet = { workspace = true }
+vortex = { workspace = true }
 tokio = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }

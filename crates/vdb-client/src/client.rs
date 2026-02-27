@@ -49,6 +49,7 @@ impl VdbClient {
                 dimension,
                 distance_metric: distance_metric.to_string(),
                 metadata_fields: fields,
+                storage_format: String::new(),
             })
             .await?;
         Ok(())
@@ -153,10 +154,7 @@ impl VdbClient {
         Ok(resp.into_inner().count)
     }
 
-    pub async fn compact(
-        &mut self,
-        collection: &str,
-    ) -> Result<(u64, u64, u64)> {
+    pub async fn compact(&mut self, collection: &str) -> Result<(u64, u64, u64)> {
         let resp = self
             .inner
             .compact(CompactRequest {

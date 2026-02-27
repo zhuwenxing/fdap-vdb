@@ -34,6 +34,7 @@ fn make_config(name: &str, dim: usize) -> CollectionConfig {
                 field_type: MetadataFieldType::Int64,
             },
         ],
+        storage_format: Default::default(),
     }
 }
 
@@ -75,9 +76,7 @@ fn bench_engine_insert(c: &mut Criterion) {
                     || {
                         let dir = tempfile::tempdir().unwrap();
                         let engine = StorageEngine::open(dir.path()).unwrap();
-                        engine
-                            .create_collection(make_config("bench", dim))
-                            .unwrap();
+                        engine.create_collection(make_config("bench", dim)).unwrap();
                         (dir, engine)
                     },
                     |(_dir, engine)| {
@@ -106,15 +105,11 @@ fn bench_engine_flush(c: &mut Criterion) {
                     || {
                         let dir = tempfile::tempdir().unwrap();
                         let engine = StorageEngine::open(dir.path()).unwrap();
-                        engine
-                            .create_collection(make_config("bench", dim))
-                            .unwrap();
+                        engine.create_collection(make_config("bench", dim)).unwrap();
                         let vecs = random_vectors(n, dim);
                         let ids: Vec<String> = (0..n).map(|i| format!("id_{i}")).collect();
                         let metadata = make_metadata(n);
-                        engine
-                            .insert("bench", ids, vecs, metadata)
-                            .unwrap();
+                        engine.insert("bench", ids, vecs, metadata).unwrap();
                         (dir, engine)
                     },
                     |(_dir, engine)| {
@@ -134,16 +129,12 @@ fn bench_engine_search(c: &mut Criterion) {
     for &(n, dim) in &[(10_000, 128), (100_000, 128), (10_000, 768)] {
         let dir = tempfile::tempdir().unwrap();
         let engine = StorageEngine::open(dir.path()).unwrap();
-        engine
-            .create_collection(make_config("bench", dim))
-            .unwrap();
+        engine.create_collection(make_config("bench", dim)).unwrap();
 
         let vecs = random_vectors(n, dim);
         let ids: Vec<String> = (0..n).map(|i| format!("id_{i}")).collect();
         let metadata = make_metadata(n);
-        engine
-            .insert("bench", ids, vecs, metadata)
-            .unwrap();
+        engine.insert("bench", ids, vecs, metadata).unwrap();
 
         let mut rng = rand::thread_rng();
         let query: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();

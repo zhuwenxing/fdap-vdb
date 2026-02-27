@@ -116,9 +116,7 @@ fn extract_metadata(
 fn parse_metric(s: Option<&str>) -> PyResult<DistanceMetric> {
     match s {
         None => Ok(DistanceMetric::default()),
-        Some(s) => s
-            .parse::<DistanceMetric>()
-            .map_err(PyValueError::new_err),
+        Some(s) => s.parse::<DistanceMetric>().map_err(PyValueError::new_err),
     }
 }
 
@@ -179,6 +177,7 @@ impl VDB {
             distance_metric: metric,
             index_config: Default::default(),
             metadata_fields: fields,
+            storage_format: Default::default(),
         };
         self.engine.create_collection(config).map_err(vdb_err)
     }
@@ -257,7 +256,10 @@ impl VDB {
         let query = extract_query_vector(query_vector)?;
         let k = top_k.unwrap_or(10);
         let ef = k.max(50); // ef >= top_k for good recall
-        let hits = self.engine.search(collection, &query, k, ef).map_err(vdb_err)?;
+        let hits = self
+            .engine
+            .search(collection, &query, k, ef)
+            .map_err(vdb_err)?;
 
         let mut results = Vec::with_capacity(hits.len());
         for hit in hits {
@@ -305,8 +307,8 @@ impl VDB {
     /// Returns a pyarrow.RecordBatch.
     fn sql<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
         let engine = self.engine.clone();
-        let ctx = create_session_context(engine)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let ctx =
+            create_session_context(engine).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
         let batches = self.runtime.block_on(async {
             let df = ctx

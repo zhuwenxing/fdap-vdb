@@ -112,6 +112,7 @@ mod tests {
             distance_metric: DistanceMetric::Cosine,
             index_config: Default::default(),
             metadata_fields: vec![],
+            storage_format: Default::default(),
         };
         catalog.create_collection(config.clone()).unwrap();
         assert!(catalog.get_collection("test").is_ok());

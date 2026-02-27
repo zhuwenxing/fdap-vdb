@@ -511,8 +511,7 @@ impl StorageEngine {
         let mut keep_indices = Vec::new();
         for i in 0..total_rows {
             let is_soft_deleted = deleted_col.is_some_and(|d| d.value(i));
-            let is_id_deleted = id_col
-                .is_some_and(|c| state.deleted_ids.contains(c.value(i)));
+            let is_id_deleted = id_col.is_some_and(|c| state.deleted_ids.contains(c.value(i)));
             if !is_soft_deleted && !is_id_deleted {
                 keep_indices.push(i as u64);
             }
@@ -752,6 +751,7 @@ mod tests {
                 name: "category".to_string(),
                 field_type: MetadataFieldType::String,
             }],
+            storage_format: Default::default(),
         }
     }
 

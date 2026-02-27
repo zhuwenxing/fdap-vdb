@@ -26,6 +26,7 @@ fn test_collection_config(name: &str) -> CollectionConfig {
                 field_type: MetadataFieldType::Int64,
             },
         ],
+        storage_format: Default::default(),
     }
 }
 

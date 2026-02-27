@@ -82,6 +82,7 @@ mod tests {
                 name: "category".to_string(),
                 field_type: MetadataFieldType::String,
             }],
+            storage_format: Default::default(),
         };
         let schema = collection_schema(&config).unwrap();
         assert_eq!(schema.fields().len(), 5); // _id, vector, category, _created_at, _deleted

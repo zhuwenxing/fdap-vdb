@@ -1,6 +1,39 @@
+use std::fmt;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use crate::metrics::DistanceMetric;
+
+/// Storage file format for segment data.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageFormat {
+    #[default]
+    Parquet,
+    Vortex,
+}
+
+impl fmt::Display for StorageFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parquet => write!(f, "parquet"),
+            Self::Vortex => write!(f, "vortex"),
+        }
+    }
+}
+
+impl FromStr for StorageFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "parquet" => Ok(Self::Parquet),
+            "vortex" => Ok(Self::Vortex),
+            _ => Err(format!("unknown storage format: {s}")),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionConfig {
@@ -12,6 +45,8 @@ pub struct CollectionConfig {
     pub index_config: IndexConfig,
     #[serde(default)]
     pub metadata_fields: Vec<MetadataFieldConfig>,
+    #[serde(default)]
+    pub storage_format: StorageFormat,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

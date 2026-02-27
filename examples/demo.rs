@@ -96,9 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     metadata.insert("category".to_string(), categories);
     metadata.insert("score".to_string(), scores);
 
-    let count = client
-        .insert("articles", ids, vectors, metadata)
-        .await?;
+    let count = client.insert("articles", ids, vectors, metadata).await?;
     println!("  inserted {count} vectors\n");
 
     // ── 3. 搜索（数据在 memtable 中，暴力扫描） ─────────────────
@@ -170,14 +168,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("  result ({} batches):", batches.len());
     for batch in &batches {
-        println!("{}", arrow::util::pretty::pretty_format_batches(&[batch.clone()])?);
+        println!(
+            "{}",
+            arrow::util::pretty::pretty_format_batches(&[batch.clone()])?
+        );
     }
     println!();
 
     // ── 7. Delete 软删除 ──────────────────────────────────────────
     println!("=== Step 7: Delete vectors ===");
     let del_count = client
-        .delete("articles", vec!["article_0".to_string(), "extra_near".to_string()])
+        .delete(
+            "articles",
+            vec!["article_0".to_string(), "extra_near".to_string()],
+        )
         .await?;
     println!("  deleted {del_count} vectors (article_0, extra_near)");
 

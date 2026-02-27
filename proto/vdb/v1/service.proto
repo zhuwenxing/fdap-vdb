@@ -18,6 +18,7 @@ message CreateCollectionRequest {
   uint32 dimension = 2;
   string distance_metric = 3;
   repeated FieldSchema metadata_fields = 4;
+  string storage_format = 5;
 }
 
 message FieldSchema {
@@ -37,6 +38,7 @@ message CollectionInfo {
   string name = 1;
   uint32 dimension = 2;
   string distance_metric = 3;
+  string storage_format = 4;
 }
 
 message DropCollectionRequest {

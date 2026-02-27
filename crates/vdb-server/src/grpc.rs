@@ -49,12 +49,21 @@ impl proto::vdb_service_server::VdbService for VdbGrpcService {
             })
             .collect::<Result<_, Status>>()?;
 
+        let storage_format = if req.storage_format.is_empty() {
+            Default::default()
+        } else {
+            req.storage_format
+                .parse()
+                .map_err(Status::invalid_argument)?
+        };
+
         let config = CollectionConfig {
             name: req.name,
             dimension: req.dimension as usize,
             distance_metric: metric,
             index_config: Default::default(),
             metadata_fields,
+            storage_format,
         };
 
         self.engine
@@ -75,6 +84,7 @@ impl proto::vdb_service_server::VdbService for VdbGrpcService {
                 name: c.name,
                 dimension: c.dimension as u32,
                 distance_metric: c.distance_metric.as_str().to_string(),
+                storage_format: c.storage_format.to_string(),
             })
             .collect();
 
