@@ -1,7 +1,9 @@
 name: CI
+
 on: [push, pull_request]
+
 jobs:
-  check:
+  rust-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,3 +14,24 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace -- -D warnings
       - run: cargo test --workspace
+
+  python-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install maturin numpy pyarrow pytest
+      - name: Build and install vdb-python
+        working-directory: crates/vdb-python
+        run: maturin develop
+      - name: Run tests
+        working-directory: crates/vdb-python
+        run: pytest tests/ -v
