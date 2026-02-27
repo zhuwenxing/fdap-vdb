@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.0"]
+build-backend = "maturin"
+
+[project]
+name = "fdap-vdb"
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = ["pyarrow>=15.0", "numpy>=1.24"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+features = ["pyo3/extension-module"]

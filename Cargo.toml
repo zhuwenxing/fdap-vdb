@@ -6,6 +6,7 @@ members = [
     "crates/vdb-query",
     "crates/vdb-server",
     "crates/vdb-client",
+    "crates/vdb-python",
 ]
 resolver = "2"
 

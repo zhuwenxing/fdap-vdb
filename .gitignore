@@ -3,3 +3,11 @@ target/
 *.swp
 *.swo
 .DS_Store
+
+# Python / maturin
+*.so
+*.pyd
+__pycache__/
+*.pyc
+.pytest_cache/
+crates/vdb-python/.venv/

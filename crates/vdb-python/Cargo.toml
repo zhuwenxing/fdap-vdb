@@ -1,0 +1,17 @@
+[package]
+name = "vdb-python"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "fdap_vdb"
+crate-type = ["cdylib"]
+
+[dependencies]
+vdb-common = { workspace = true }
+vdb-storage = { workspace = true }
+vdb-query = { workspace = true }
+arrow = { workspace = true, features = ["pyarrow"] }
+pyo3 = { version = "0.26", features = ["extension-module"] }
+tokio = { workspace = true }
+numpy = "0.26"
