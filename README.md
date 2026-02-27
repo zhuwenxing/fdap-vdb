@@ -65,47 +65,18 @@ db.drop_collection("docs")
 
 ## API
 
-### `VDB(data_dir: str)`
-
-打开或创建数据库。
-
-### `create_collection(name, dimension, distance_metric=None, metadata_fields=None)`
-
-创建集合。`distance_metric` 可选 `"cosine"` (默认)、`"l2"`、`"inner_product"`。
-`metadata_fields` 为 `[(name, type)]` 列表，type 支持 `string`、`int64`、`float64`、`bool`。
-
-### `insert(collection, ids, vectors, metadata=None) -> int`
-
-批量插入。`vectors` 接受 numpy 2D 数组或 `list[list[float]]`。返回插入数量。
-
-### `search(collection, query_vector, top_k=10) -> list[dict]`
-
-向量相似度搜索。`query_vector` 接受 numpy 1D 数组或 `list[float]`。
-返回 `[{"id", "distance", "metadata"}]`。
-
-### `delete(collection, ids) -> int`
-
-按 ID 软删除。返回实际删除数量。
-
-### `flush(collection)`
-
-手动将 MemTable 刷盘为 Segment。
-
-### `compact(collection) -> dict`
-
-合并 Segment + 物理清理已删除行。返回 `{"segments_before", "segments_after", "rows_removed"}`。
-
-### `sql(query) -> pyarrow.RecordBatch`
-
-执行 SQL 查询，每个集合自动注册为表。
-
-### `list_collections() -> list[dict]`
-
-列出所有集合。
-
-### `drop_collection(name)`
-
-删除集合及其所有数据。
+| 方法 | 说明 |
+|------|------|
+| `VDB(data_dir)` | 打开或创建数据库 |
+| `create_collection(name, dimension, distance_metric=None, metadata_fields=None)` | 创建集合。metric: `cosine`(默认)/`l2`/`inner_product`。metadata_fields: `[(name, type)]`，type 支持 `string`/`int64`/`float64`/`bool` |
+| `insert(collection, ids, vectors, metadata=None) -> int` | 批量插入。vectors 接受 numpy 2D 数组或 `list[list[float]]` |
+| `search(collection, query_vector, top_k=10) -> list[dict]` | 向量相似度搜索。返回 `[{"id", "distance", "metadata"}]` |
+| `delete(collection, ids) -> int` | 按 ID 软删除，返回实际删除数量 |
+| `flush(collection)` | 手动将 MemTable 刷盘为 Segment |
+| `compact(collection) -> dict` | 合并 Segment + 物理清理已删除行 |
+| `sql(query) -> pyarrow.RecordBatch` | SQL 查询，每个集合自动注册为表 |
+| `list_collections() -> list[dict]` | 列出所有集合 |
+| `drop_collection(name)` | 删除集合及其所有数据 |
 
 ## 特性
 
